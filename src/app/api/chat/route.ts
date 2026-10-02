@@ -16,6 +16,40 @@ const ai = new GoogleGenAI({ apiKey });
 // Keep your current model as the default; override with GEMINI_MODEL if needed.
 const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
+const TIMEOUT_MS = 12000;
+
+/** Calls Gemini but never waits longer than TIMEOUT_MS, and logs timing. */
+async function generate(
+  label: string,
+  params: Parameters<typeof ai.models.generateContent>[0]
+) {
+  const started = Date.now();
+
+  try {
+    return await new Promise<Awaited<ReturnType<typeof ai.models.generateContent>>>(
+      (resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error(`${label} timed out after ${TIMEOUT_MS}ms`)),
+          TIMEOUT_MS
+        );
+
+        ai.models.generateContent(params).then(
+          (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (error) => {
+            clearTimeout(timer);
+            reject(error);
+          }
+        );
+      }
+    );
+  } finally {
+    console.log(`[chat] ${label} (${MODEL}) took ${Date.now() - started}ms`);
+  }
+}
+
 const SITE = "https://zoidics.com";
 const CONTACT_EMAIL = "connect@zoidics.com";
 
@@ -117,6 +151,8 @@ HOW YOU MUST RESPOND
 7. If the visitor wants to contact the team, share ${CONTACT_EMAIL} and explain that you can also pass their details to the team right here.
 8. If the visitor asks about something unrelated to Zoidics, say politely that you can only help with Zoidics services and enquiries.
 9. Do not mention specific technologies, frameworks or tools unless the visitor asks.
+10. If your previous message already asked for the same detail and the visitor answered something else, respond to what they said, then ask for the detail again in a shorter, differently worded sentence. Never repeat your earlier question word for word.
+11. Treat what the visitor volunteers (for example a budget or a timeline) as useful. Acknowledge it briefly and do not ask for it again later.
 
 STYLE
 Professional, clear, concise and respectful. No jokes, no slang, no emojis.
@@ -373,7 +409,7 @@ Return JSON with these fields:
 `;
 
   try {
-    const res = await ai.models.generateContent({
+    const res = await generate("extraction", {
       model: MODEL,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
@@ -526,7 +562,7 @@ async function generateReply(
   };
 
   try {
-    const res = await ai.models.generateContent({
+    const res = await generate("reply", {
       model: MODEL,
       contents,
       config: {
